@@ -16,6 +16,7 @@ from tools.tsp_solver import solve_tsp
 # ---------------------------------------------------------------------------
 MAX_STOPS = 50
 
+DEFAULT_HOME = "10911 Callanish Park Drive Austin, TX 78750"
 DEMO_HOME = "Texas State Capitol, Austin, TX"
 DEMO_STOPS = """Zilker Park, Austin, TX
 The Domain, Austin, TX
@@ -98,6 +99,47 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Password gate
+# ---------------------------------------------------------------------------
+def check_password():
+    """Return True if the user has entered the correct password."""
+    try:
+        correct_password = st.secrets["APP_PASSWORD"]
+    except (KeyError, FileNotFoundError):
+        st.error("App not configured. The app owner must set APP_PASSWORD in Streamlit Secrets.")
+        st.stop()
+        return False
+
+    if st.session_state.get("authenticated"):
+        return True
+
+    st.markdown("""
+    <div style="text-align: center; padding: 48px 24px; margin: 32px auto; max-width: 400px;">
+        <div style="font-size: 4rem; margin-bottom: 16px;">&#x1F697;</div>
+        <h2 style="color: #2D2D2D; font-weight: 700; margin-bottom: 24px;">Donna's Drive Time</h2>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.form("login_form"):
+        password = st.text_input("Password", type="password", placeholder="Enter password")
+        submit = st.form_submit_button("Log in", type="primary", use_container_width=True)
+
+    if submit:
+        import hmac
+        if hmac.compare_digest(password, correct_password):
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password. Please try again.")
+
+    return False
+
+
+if not check_password():
+    st.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +252,7 @@ def generate_google_maps_url(ordered_addresses, return_to_start: bool) -> str:
 # Session state defaults
 # ---------------------------------------------------------------------------
 _defaults = {
-    "home_address": "",
+    "home_address": DEFAULT_HOME,
     "addresses_text": "",
     "route_result": None,
     "last_optimize_time": 0.0,
