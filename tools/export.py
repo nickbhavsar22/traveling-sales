@@ -4,6 +4,13 @@ import urllib.parse
 from typing import Dict
 
 
+def sanitize_csv_value(val):
+    """Prevent CSV formula injection by prefixing dangerous characters."""
+    if isinstance(val, str) and val and val[0] in ('=', '@', '+', '-'):
+        return "'" + val
+    return val
+
+
 def route_to_csv(route_data: Dict) -> str:
     """
     Convert optimized route data to a CSV string.
@@ -34,7 +41,7 @@ def route_to_csv(route_data: Dict) -> str:
 
         writer.writerow([
             stop["sequence"] + 1,
-            stop["address"],
+            sanitize_csv_value(stop["address"]),
             dist_mi,
             time_next,
             stop["lat"],

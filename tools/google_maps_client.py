@@ -13,6 +13,14 @@ class GoogleMapsClient:
     def __init__(self, api_key: str):
         self.client = googlemaps.Client(key=api_key)
 
+    def validate_api_key(self) -> bool:
+        """Test the API key with a simple geocode request. Returns True if valid."""
+        try:
+            result = self.client.geocode("New York, NY")
+            return bool(result)
+        except Exception:
+            return False
+
     def geocode_addresses(self, addresses: List[str]) -> List[Dict]:
         """
         Geocode a list of addresses to lat/lng coordinates.
