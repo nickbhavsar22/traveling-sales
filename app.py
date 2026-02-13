@@ -520,7 +520,11 @@ if n_total >= 2 and not over_limit:
 # Advanced settings (outside form)
 # ---------------------------------------------------------------------------
 with st.expander("Advanced settings"):
-    time_limit = st.slider("Solver time limit (seconds)", 5, 60, 30)
+    time_limit = st.slider("Solver time limit (seconds)", 5, 60, 10)
+    if n_total >= 2:
+        est_total = n_total * 0.2 + (((n_total + 9) // 10) ** 2) * 0.4 + time_limit
+        if est_total > 30:
+            st.caption(f"Estimated wait: ~{int(est_total)} seconds")
 
 
 # ---------------------------------------------------------------------------
@@ -577,11 +581,23 @@ if submitted:
     geocoded = []
     cache_hits = 0
     cache_misses = 0
-    for addr in all_addresses:
-        # Check if result is already cached by attempting the call
-        # (st.cache_data handles the caching transparently)
-        result = cached_geocode(addr, api_key)
-        geocoded.append(result)
+    for idx, addr in enumerate(all_addresses):
+        progress.progress(
+            10 + int(30 * (idx + 1) / len(all_addresses)),
+            text=f"Looking up address {idx + 1} of {len(all_addresses)}...",
+        )
+        try:
+            result = cached_geocode(addr, api_key)
+            geocoded.append(result)
+        except Exception:
+            geocoded.append({
+                "input_address": addr,
+                "formatted_address": None,
+                "lat": None,
+                "lng": None,
+                "place_id": None,
+                "status": "FAILED",
+            })
 
     # Determine cache stats: we count successes as the total;
     # exact cache/miss tracking requires deeper hooks, so we report totals.
@@ -606,7 +622,16 @@ if submitted:
     progress.progress(50, text="Getting real driving distances...")
 
     locations_tuple = tuple((g["lat"], g["lng"]) for g in successful)
-    distance_matrix, duration_matrix = cached_distance_matrix(locations_tuple, api_key)
+    try:
+        distance_matrix, duration_matrix = cached_distance_matrix(locations_tuple, api_key)
+    except Exception as e:
+        progress.empty()
+        st.error(
+            f"Could not compute driving distances: {e}\n\n"
+            "This can happen due to a network issue, API rate limit, or temporary outage. "
+            "Please wait a moment and try again."
+        )
+        st.stop()
 
     progress.progress(75, text="Distances computed. Finding the best route...")
 
@@ -622,12 +647,20 @@ if submitted:
 
     progress.progress(90, text="Almost there...")
 
-    result = solve_tsp(
-        distance_matrix=distance_matrix,
-        depot=depot,
-        return_to_depot=effective_return,
-        time_limit_seconds=time_limit,
-    )
+    try:
+        result = solve_tsp(
+            distance_matrix=distance_matrix,
+            depot=depot,
+            return_to_depot=effective_return,
+            time_limit_seconds=time_limit,
+        )
+    except Exception as e:
+        progress.empty()
+        st.error(
+            f"Route solver encountered an error: {e}\n\n"
+            "Please try again with fewer addresses or a different solver time limit."
+        )
+        st.stop()
 
     if result is None:
         progress.empty()
