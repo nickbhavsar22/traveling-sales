@@ -341,7 +341,7 @@ for key, value in _defaults.items():
 # ---------------------------------------------------------------------------
 # Brand header
 # ---------------------------------------------------------------------------
-st.markdown("""
+st.markdown(f"""
 <div style="display: flex; align-items: center; gap: 16px; padding: 8px 0 24px 0;">
     <div style="background: linear-gradient(135deg, #E8654A 0%, #E9A820 100%); border-radius: 16px; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; font-size: 28px; box-shadow: 0 4px 12px rgba(232, 101, 74, 0.3); flex-shrink: 0;">&#x1F697;</div>
     <div>
