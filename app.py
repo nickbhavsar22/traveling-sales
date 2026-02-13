@@ -16,15 +16,41 @@ from tools.tsp_solver import solve_tsp
 # ---------------------------------------------------------------------------
 MAX_STOPS = 50
 
-DEFAULT_HOME = "10911 Callanish Park Drive Austin, TX 78750"
+DEFAULT_HOME = ""
 DEMO_HOME = "Texas State Capitol, Austin, TX"
-DEMO_STOPS = """Zilker Park, Austin, TX
-The Domain, Austin, TX
-Mueller Lake Park, Austin, TX
-Barton Springs Pool, Austin, TX
-Austin-Bergstrom International Airport, Austin, TX
-Lady Bird Lake Trail, Austin, TX
-Mount Bonnell, Austin, TX"""
+DEMO_STOPS_DATA = [
+    {"First Name": "Alice", "Last Name": "Johnson",
+     "Billing Street": "Zilker Park", "Billing City": "Austin",
+     "Billing State/Province": "TX", "Billing Zip/Postal Code": ""},
+    {"First Name": "Bob", "Last Name": "Smith",
+     "Billing Street": "The Domain", "Billing City": "Austin",
+     "Billing State/Province": "TX", "Billing Zip/Postal Code": ""},
+    {"First Name": "Carol", "Last Name": "Davis",
+     "Billing Street": "Mueller Lake Park", "Billing City": "Austin",
+     "Billing State/Province": "TX", "Billing Zip/Postal Code": ""},
+    {"First Name": "Dan", "Last Name": "Wilson",
+     "Billing Street": "Barton Springs Pool", "Billing City": "Austin",
+     "Billing State/Province": "TX", "Billing Zip/Postal Code": ""},
+    {"First Name": "Eve", "Last Name": "Martinez",
+     "Billing Street": "Austin-Bergstrom International Airport", "Billing City": "Austin",
+     "Billing State/Province": "TX", "Billing Zip/Postal Code": ""},
+    {"First Name": "Frank", "Last Name": "Lee",
+     "Billing Street": "Lady Bird Lake Trail", "Billing City": "Austin",
+     "Billing State/Province": "TX", "Billing Zip/Postal Code": ""},
+    {"First Name": "Grace", "Last Name": "Taylor",
+     "Billing Street": "Mount Bonnell", "Billing City": "Austin",
+     "Billing State/Province": "TX", "Billing Zip/Postal Code": ""},
+]
+
+# Column patterns for auto-detecting CSV columns (priority order, first match wins)
+COLUMN_PATTERNS = {
+    "first_name": ["first name", "firstname", "first"],
+    "last_name":  ["last name", "lastname", "last", "surname"],
+    "street":     ["billing street", "mailing street", "shipping street", "street", "address", "street address"],
+    "city":       ["billing city", "mailing city", "shipping city", "city"],
+    "state":      ["billing state", "billing state/province", "mailing state", "mailing state/province", "state", "state/province"],
+    "zip":        ["billing zip", "billing zip/postal code", "mailing zip", "mailing zip/postal code", "zip", "zip code", "postal code"],
+}
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -207,21 +233,65 @@ def sanitize_csv_value(value: str) -> str:
     return value
 
 
-def route_to_csv(ordered_addresses, leg_distances_mi, leg_durations_sec, labels):
+def detect_columns(df):
+    """Auto-detect CSV columns by matching against known Salesforce/CRM patterns.
+
+    Returns a dict mapping role -> actual column name (or None for optional columns).
+    Raises ValueError if required columns are missing.
+    """
+    normalized = {col.strip().lower(): col for col in df.columns}
+    detected = {}
+
+    for role, patterns in COLUMN_PATTERNS.items():
+        detected[role] = None
+        for pattern in patterns:
+            if pattern in normalized:
+                detected[role] = normalized[pattern]
+                break
+
+    # Check required columns
+    missing = []
+    for req in ("first_name", "last_name", "street"):
+        if detected[req] is None:
+            missing.append(req.replace("_", " ").title())
+    if missing:
+        raise ValueError(
+            f"Could not find required column(s): {', '.join(missing)}. "
+            f"Expected columns like: First Name, Last Name, Billing Street (or Address/Street)."
+        )
+
+    return detected
+
+
+def compose_address(row, col_map):
+    """Build a full address string from detected street/city/state/zip columns."""
+    parts = []
+    for role in ("street", "city", "state", "zip"):
+        col = col_map.get(role)
+        if col is not None:
+            val = str(row[col]).strip()
+            if val and val.lower() != "nan":
+                parts.append(val)
+    return ", ".join(parts)
+
+
+def route_to_csv(ordered_addresses, leg_distances_mi, leg_durations_sec, labels, names):
     """Generate a CSV string for the optimized route."""
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["#", "Label", "Address", "Leg Distance (mi)", "Leg Duration"])
+    writer.writerow(["#", "Label", "First Name", "Last Name", "Address", "Leg Distance (mi)", "Leg Duration"])
     for i, addr in enumerate(ordered_addresses):
         safe_addr = sanitize_csv_value(addr)
         safe_label = sanitize_csv_value(labels[i])
+        safe_fname = sanitize_csv_value(names[i]["first_name"])
+        safe_lname = sanitize_csv_value(names[i]["last_name"])
         if i < len(leg_distances_mi):
             dist = f"{leg_distances_mi[i]:.1f}"
             dur = seconds_to_hm(leg_durations_sec[i])
         else:
             dist = ""
             dur = "-- END --"
-        writer.writerow([i + 1, safe_label, safe_addr, dist, dur])
+        writer.writerow([i + 1, safe_label, safe_fname, safe_lname, safe_addr, dist, dur])
     return buf.getvalue()
 
 
@@ -253,7 +323,7 @@ def generate_google_maps_url(ordered_addresses, return_to_start: bool) -> str:
 # ---------------------------------------------------------------------------
 _defaults = {
     "home_address": DEFAULT_HOME,
-    "addresses_text": "",
+    "uploaded_df": None,
     "route_result": None,
     "last_optimize_time": 0.0,
 }
@@ -281,9 +351,55 @@ st.markdown("""
 # ---------------------------------------------------------------------------
 if st.button("Load demo addresses"):
     st.session_state.home_address = DEMO_HOME
-    st.session_state.addresses_text = DEMO_STOPS
+    st.session_state.uploaded_df = pd.DataFrame(DEMO_STOPS_DATA)
     st.session_state.route_result = None
     st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# CSV format guide
+# ---------------------------------------------------------------------------
+with st.expander("CSV format guide"):
+    st.markdown(
+        "Upload a CSV exported from Salesforce or any CRM. The app **auto-detects** "
+        "columns by name. Only First Name, Last Name, and address columns are used "
+        "-- everything else (Email, Phone, etc.) is ignored."
+    )
+    st.markdown("**Required columns:** First Name, Last Name, and a street/address column")
+    st.markdown("**Optional columns:** City, State, Zip (improves geocoding accuracy)")
+
+    sample_html = (
+        '<table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 8px 0;">'
+        '<tr style="background-color: #F5EDE4;">'
+        '<th style="padding: 8px 12px; text-align: left;">First Name</th>'
+        '<th style="padding: 8px 12px; text-align: left;">Last Name</th>'
+        '<th style="padding: 8px 12px; text-align: left;">Billing Street</th>'
+        '<th style="padding: 8px 12px; text-align: left;">Billing City</th>'
+        '<th style="padding: 8px 12px; text-align: left;">Billing State/Province</th>'
+        '<th style="padding: 8px 12px; text-align: left;">Billing Zip/Postal Code</th>'
+        '</tr>'
+        '<tr><td style="padding: 8px 12px;">Alice</td><td style="padding: 8px 12px;">Johnson</td>'
+        '<td style="padding: 8px 12px;">123 Main St</td><td style="padding: 8px 12px;">Austin</td>'
+        '<td style="padding: 8px 12px;">TX</td><td style="padding: 8px 12px;">78701</td></tr>'
+        '<tr style="background-color: #FDF8F4;"><td style="padding: 8px 12px;">Bob</td>'
+        '<td style="padding: 8px 12px;">Smith</td>'
+        '<td style="padding: 8px 12px;">456 Oak Ave</td><td style="padding: 8px 12px;">Round Rock</td>'
+        '<td style="padding: 8px 12px;">TX</td><td style="padding: 8px 12px;">78664</td></tr>'
+        '</table>'
+    )
+    st.markdown(sample_html, unsafe_allow_html=True)
+
+    template_csv = (
+        'First Name,Last Name,Billing Street,Billing City,Billing State/Province,Billing Zip/Postal Code\n'
+        'Alice,Johnson,"123 Main St",Austin,TX,78701\n'
+        'Bob,Smith,"456 Oak Ave",Round Rock,TX,78664\n'
+    )
+    st.download_button(
+        label="Download template CSV",
+        data=template_csv,
+        file_name="donnas_drive_time_template.csv",
+        mime="text/csv",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -291,33 +407,91 @@ if st.button("Load demo addresses"):
 # ---------------------------------------------------------------------------
 with st.form("route_form"):
     home_address = st.text_input(
-        "Home / Starting Address",
+        "Home / Starting Address (optional)",
         value=st.session_state.home_address,
         placeholder="e.g. 123 Main St, City, State",
+        help="Leave blank to optimize the route without a fixed start or end.",
     )
 
-    addresses_text = st.text_area(
-        "Stop addresses (one per line)",
-        value=st.session_state.addresses_text,
-        height=250,
-        placeholder="456 Oak Ave, City, State\n789 Elm Dr, City, State\n...",
+    uploaded_file = st.file_uploader(
+        "Upload stop addresses (CSV)",
+        type=["csv"],
+        help="CSV with columns: First Name, Last Name, and address fields (Billing Street, City, State, Zip). Other columns are ignored.",
     )
 
-    return_to_start = st.checkbox("End back at home", value=True)
+    return_to_start = st.checkbox(
+        "End back at home", value=True,
+        help="Only applies when a home address is provided.",
+    )
 
     submitted = st.form_submit_button("Optimize Route", type="primary", use_container_width=True)
 
 
 # ---------------------------------------------------------------------------
-# Parse addresses and show info below the form
+# Parse CSV and detect columns
 # ---------------------------------------------------------------------------
-stop_lines = [line.strip() for line in addresses_text.strip().splitlines() if line.strip()]
+stops_df = None
+
+# If a new file was uploaded with this form submission, use it
+if submitted and uploaded_file is not None:
+    try:
+        stops_df = pd.read_csv(uploaded_file)
+        st.session_state.uploaded_df = stops_df
+    except Exception as e:
+        st.error(f"Could not read CSV file: {e}")
+        st.stop()
+elif st.session_state.uploaded_df is not None:
+    stops_df = st.session_state.uploaded_df
+
+has_home = bool(home_address.strip())
+
+# Parse the CSV into addresses and names
+stop_lines = []
+stop_names = []
+col_map = {}
+
+if stops_df is not None:
+    try:
+        col_map = detect_columns(stops_df)
+    except ValueError as e:
+        st.error(str(e))
+        st.stop()
+
+    # Show which columns were detected
+    detected_labels = [col_map[r] for r in ("first_name", "last_name", "street", "city", "state", "zip") if col_map.get(r)]
+    st.info(f"Detected columns: {', '.join(detected_labels)}")
+
+    # Fill NaN values and strip whitespace for name columns
+    fname_col = col_map["first_name"]
+    lname_col = col_map["last_name"]
+    stops_df[fname_col] = stops_df[fname_col].fillna("").astype(str).str.strip()
+    stops_df[lname_col] = stops_df[lname_col].fillna("").astype(str).str.strip()
+
+    # Compose full addresses and filter empty ones
+    for _, row in stops_df.iterrows():
+        addr = compose_address(row, col_map)
+        if addr:
+            stop_lines.append(addr)
+            stop_names.append({"first_name": row[fname_col], "last_name": row[lname_col]})
+
+    # Show preview
+    if stop_lines:
+        preview_data = {
+            "First Name": [n["first_name"] for n in stop_names],
+            "Last Name": [n["last_name"] for n in stop_names],
+            "Address": stop_lines,
+        }
+        st.dataframe(pd.DataFrame(preview_data), use_container_width=True, hide_index=True)
+
 n_stops = len(stop_lines)
 
 all_addresses = []
-if home_address.strip():
+all_names = []
+if has_home:
     all_addresses.append(home_address.strip())
+    all_names.append({"first_name": "", "last_name": ""})
 all_addresses.extend(stop_lines)
+all_names.extend(stop_names)
 
 n_total = len(all_addresses)
 
@@ -358,7 +532,7 @@ if st.session_state.route_result is None and n_total < 2:
         <div style="font-size: 4rem; margin-bottom: 16px;">&#x1F697;</div>
         <h2 style="color: #2D2D2D; font-weight: 700; margin-bottom: 8px;">Ready to hit the road?</h2>
         <p style="color: #6B6B6B; font-size: 1.1rem; max-width: 500px; margin: 0 auto 24px auto; line-height: 1.6;">
-            Enter your starting address and all the stops you need to make. We'll find the shortest driving route so you spend less time behind the wheel.
+            Upload a CSV with your stops and optionally set a home address. We'll find the shortest driving route so you spend less time behind the wheel.
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -370,7 +544,6 @@ if st.session_state.route_result is None and n_total < 2:
 if submitted:
     # Save inputs to session state
     st.session_state.home_address = home_address
-    st.session_state.addresses_text = addresses_text
     st.session_state.route_result = None
 
     # Validation
@@ -379,7 +552,10 @@ if submitted:
         st.stop()
 
     if n_total < 2:
-        st.warning("Enter a home address and at least one stop address to optimize a route.")
+        if has_home:
+            st.warning("Upload a CSV with at least one stop address to optimize a route.")
+        else:
+            st.warning("Upload a CSV with at least two stop addresses, or add a home address with one stop.")
         st.stop()
 
     # Rate limiting: 30-second cooldown
@@ -435,16 +611,21 @@ if submitted:
     progress.progress(75, text="Distances computed. Finding the best route...")
 
     # Step 3: Solve TSP
-    depot = 0
-    if 0 in success_indices:
-        depot = success_indices.index(0)
+    if has_home:
+        depot = 0
+        if 0 in success_indices:
+            depot = success_indices.index(0)
+        effective_return = return_to_start
+    else:
+        depot = None
+        effective_return = False
 
     progress.progress(90, text="Almost there...")
 
     result = solve_tsp(
         distance_matrix=distance_matrix,
         depot=depot,
-        return_to_depot=return_to_start,
+        return_to_depot=effective_return,
         time_limit_seconds=time_limit,
     )
 
@@ -453,12 +634,16 @@ if submitted:
         st.error("No feasible route found. Check your addresses and try again.")
         st.stop()
 
+    # Filter names to match successful geocodes
+    successful_names = [all_names[i] for i in success_indices]
+
     # Attach extra data
     result["successful_geocoded"] = successful
+    result["successful_names"] = successful_names
     result["duration_matrix"] = duration_matrix
     result["distance_matrix"] = distance_matrix
     result["depot"] = depot
-    result["return_to_start"] = return_to_start
+    result["return_to_start"] = effective_return
 
     st.session_state.route_result = result
 
@@ -474,6 +659,7 @@ if st.session_state.route_result is not None:
     result = st.session_state.route_result
     route = result["route"]
     geocoded_list = result["successful_geocoded"]
+    names_list = result.get("successful_names", [{"first_name": "", "last_name": ""}] * len(geocoded_list))
     dist_matrix = result["distance_matrix"]
     dur_matrix = result["duration_matrix"]
     depot = result["depot"]
@@ -503,7 +689,10 @@ if st.session_state.route_result is not None:
     savings_mi = meters_to_miles(naive_distance - total_distance_m)
 
     # Number of stops (excluding home and return-home)
-    num_stops = len(route) - (2 if rts else 1)
+    if depot is not None:
+        num_stops = len(route) - (2 if rts else 1)
+    else:
+        num_stops = len(route)
 
     # ---- Hero metric cards ----
     st.markdown(f"""
@@ -528,8 +717,9 @@ if st.session_state.route_result is not None:
     status_labels = {"OPTIMAL": "Best route found", "FEASIBLE": "Good route found", "TRIVIAL": "Direct route"}
     st.caption(status_labels.get(result["solver_status"], result["solver_status"]))
 
-    # ---- Build ordered addresses, labels, and coordinates ----
+    # ---- Build ordered addresses, names, labels, and coordinates ----
     ordered_addresses = []
+    ordered_names = []
     ordered_coords = []
     labels = []
     stop_counter = 0
@@ -537,6 +727,7 @@ if st.session_state.route_result is not None:
     for idx, node in enumerate(route):
         geo = geocoded_list[node]
         ordered_addresses.append(geo["formatted_address"] or geo["input_address"])
+        ordered_names.append(names_list[node])
         ordered_coords.append((geo["lat"], geo["lng"]))
 
         if node == depot:
@@ -547,6 +738,7 @@ if st.session_state.route_result is not None:
 
     if rts and len(labels) >= 2:
         labels[-1] = "H"
+        ordered_names[-1] = ordered_names[0]
 
     # ---- Full-width map ----
     avg_lat = sum(c[0] for c in ordered_coords) / len(ordered_coords)
@@ -561,6 +753,8 @@ if st.session_state.route_result is not None:
         geo = geocoded_list[node]
         lat, lng = geo["lat"], geo["lng"]
         addr = html.escape(geo["formatted_address"] or geo["input_address"])
+        name_info = names_list[node]
+        display_name = html.escape(f"{name_info['first_name']} {name_info['last_name']}".strip())
 
         if node == depot:
             if seen_depot and rts:
@@ -610,9 +804,13 @@ if st.session_state.route_result is not None:
                 'box-shadow: 0 2px 6px rgba(0,0,0,0.3);'
                 f'">{label}</div>'
             )
+            popup_content = f"<b>Stop {label}</b>"
+            if display_name:
+                popup_content += f"<br><b>{display_name}</b>"
+            popup_content += f"<br>{addr}"
             folium.Marker(
                 location=[lat, lng],
-                popup=folium.Popup(f"<b>Stop {label}</b><br>{addr}", max_width=250),
+                popup=folium.Popup(popup_content, max_width=250),
                 icon=folium.DivIcon(
                     html=stop_icon_html,
                     icon_size=(28, 28),
@@ -643,13 +841,15 @@ if st.session_state.route_result is not None:
         '<tr style="background-color: #F5EDE4;">'
         '<th style="padding: 10px 12px; text-align: left; font-weight: 600;">#</th>'
         '<th style="padding: 10px 12px; text-align: left; font-weight: 600;">Stop</th>'
+        '<th style="padding: 10px 12px; text-align: left; font-weight: 600;">Name</th>'
         '<th style="padding: 10px 12px; text-align: left; font-weight: 600;">Address</th>'
         '<th style="padding: 10px 12px; text-align: left; font-weight: 600;">Next Leg</th>'
         '</tr>'
     )
 
-    for i, (addr, label) in enumerate(zip(ordered_addresses, labels)):
+    for i, (addr, label, name_info) in enumerate(zip(ordered_addresses, labels, ordered_names)):
         escaped_addr = html.escape(addr)
+        display_name = html.escape(f"{name_info['first_name']} {name_info['last_name']}".strip())
 
         if rts and i == len(ordered_addresses) - 1:
             next_leg = "-- END --"
@@ -678,6 +878,7 @@ if st.session_state.route_result is not None:
             f'<tr style="background-color: {row_bg};">'
             f'<td style="padding: 10px 12px;">{i + 1}</td>'
             f'<td style="padding: 10px 12px;">{badge}</td>'
+            f'<td style="padding: 10px 12px;">{display_name}</td>'
             f'<td style="padding: 10px 12px;">{escaped_addr}</td>'
             f'<td style="padding: 10px 12px;">{next_leg}</td>'
             '</tr>'
@@ -727,6 +928,7 @@ if st.session_state.route_result is not None:
         leg_distances_mi,
         [leg_durations[i] if i < len(leg_durations) else 0 for i in range(len(ordered_addresses))],
         labels,
+        ordered_names,
     )
     st.download_button(
         label="Download CSV",
