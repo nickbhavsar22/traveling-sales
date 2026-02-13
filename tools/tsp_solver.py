@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any
 
 def solve_tsp(
     distance_matrix: List[List[int]],
-    depot: int = 0,
+    depot: Optional[int] = 0,
     return_to_depot: bool = True,
     time_limit_seconds: int = 30,
 ) -> Optional[Dict[str, Any]]:
@@ -27,7 +27,30 @@ def solve_tsp(
     if n == 0:
         return {"route": [], "total_distance": 0, "solver_status": "TRIVIAL"}
     if n == 1:
-        return {"route": [depot], "total_distance": 0, "solver_status": "TRIVIAL"}
+        return {"route": [0], "total_distance": 0, "solver_status": "TRIVIAL"}
+
+    # No fixed depot: add a dummy node with zero-cost edges so the solver
+    # can pick the best start and end for an open path.
+    if depot is None:
+        aug_matrix = [row[:] + [0] for row in distance_matrix]
+        aug_matrix.append([0] * (n + 1))
+        sub = solve_tsp(
+            distance_matrix=aug_matrix,
+            depot=n,
+            return_to_depot=False,
+            time_limit_seconds=time_limit_seconds,
+        )
+        if sub is None:
+            return None
+        route = [node for node in sub["route"] if node != n]
+        total_distance = 0
+        for i in range(len(route) - 1):
+            total_distance += distance_matrix[route[i]][route[i + 1]]
+        return {
+            "route": route,
+            "total_distance": total_distance,
+            "solver_status": sub["solver_status"],
+        }
 
     # For open-path TSP (no return to depot), zero out all distances TO the
     # depot so the solver's mandatory return leg is free.
