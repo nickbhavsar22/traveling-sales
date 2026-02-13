@@ -21,12 +21,10 @@ streamlit run app.py
 ## Directory Layout
 
 ```
-app.py                  # Main Streamlit application (UI + orchestration)
+app.py                  # Main Streamlit application (UI + orchestration + export)
 tools/
   google_maps_client.py # Geocoding and distance matrix API calls
   tsp_solver.py         # OR-Tools TSP solver
-  route_optimizer.py    # Result formatting (ordered stops, legs, totals)
-  export.py             # CSV generation and Google Maps URL builder
 workflows/
   route_optimization.md # WAT Framework SOP for the optimization pipeline
 requirements.txt        # Python dependencies

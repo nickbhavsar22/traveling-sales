@@ -19,7 +19,7 @@ A web application that takes a list of US addresses and finds the optimal visiti
 ## Quick Start
 
 ```bash
-git clone https://github.com/your-username/traveling-sales.git
+git clone https://github.com/nickbhavsar22/traveling-sales.git
 cd traveling-sales
 pip install -r requirements.txt
 ```

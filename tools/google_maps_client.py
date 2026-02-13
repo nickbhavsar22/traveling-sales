@@ -8,18 +8,10 @@ class GoogleMapsClient:
     """Wrapper around the Google Maps API for geocoding and distance matrices."""
 
     DISTANCE_MATRIX_MAX_ELEMENTS = 100
-    DISTANCE_MATRIX_MAX_DIMENSIONS = 25
+    BATCH_THROTTLE_SECONDS = 0.1
 
     def __init__(self, api_key: str):
         self.client = googlemaps.Client(key=api_key)
-
-    def validate_api_key(self) -> bool:
-        """Test the API key with a simple geocode request. Returns True if valid."""
-        try:
-            result = self.client.geocode("New York, NY")
-            return bool(result)
-        except Exception:
-            return False
 
     def geocode_addresses(self, addresses: List[str]) -> List[Dict]:
         """
@@ -114,7 +106,7 @@ class GoogleMapsClient:
                             distance_matrix[global_i][global_j] = 999999999
                             duration_matrix[global_i][global_j] = 999999999
 
-                time.sleep(0.1)
+                time.sleep(self.BATCH_THROTTLE_SECONDS)
 
         return distance_matrix, duration_matrix
 

@@ -12,8 +12,7 @@ Optimize visiting order for US addresses to minimize total driving distance.
 1. `tools/google_maps_client.py` — Geocode all addresses to lat/lng
 2. `tools/google_maps_client.py` — Build NxN distance matrix (batched 10x10)
 3. `tools/tsp_solver.py` — Solve TSP with OR-Tools
-4. `tools/route_optimizer.py` — Format results (ordered stops, legs, totals)
-5. `tools/export.py` — Generate CSV and Google Maps URL
+4. `app.py` — Format results, generate CSV, and build Google Maps URL
 
 ## Outputs
 - Interactive Folium map with labeled markers (A, B, C...) and route polyline

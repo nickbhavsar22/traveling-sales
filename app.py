@@ -15,6 +15,12 @@ from tools.tsp_solver import solve_tsp
 # Constants
 # ---------------------------------------------------------------------------
 MAX_STOPS = 50
+RATE_LIMIT_SECONDS = 30
+CACHE_TTL_SECONDS = 3600
+METERS_PER_MILE = 1609.344
+GEOCODE_COST_PER_REQUEST = 0.005
+MATRIX_COST_PER_1K_ELEMENTS = 5.0
+VERSION = "1.0.0"
 
 DEFAULT_HOME = ""
 DEMO_HOME = "Texas State Capitol, Austin, TX"
@@ -187,7 +193,7 @@ if not api_key:
 # ---------------------------------------------------------------------------
 # Caching functions
 # ---------------------------------------------------------------------------
-@st.cache_data(show_spinner=False, ttl=3600)
+@st.cache_data(show_spinner=False, ttl=CACHE_TTL_SECONDS)
 def cached_geocode(address: str, _api_key: str) -> dict:
     """Cache geocoding per individual address."""
     client = GoogleMapsClient(_api_key)
@@ -195,7 +201,7 @@ def cached_geocode(address: str, _api_key: str) -> dict:
     return results[0]
 
 
-@st.cache_data(show_spinner=False, ttl=3600)
+@st.cache_data(show_spinner=False, ttl=CACHE_TTL_SECONDS)
 def cached_distance_matrix(locations_tuple: tuple, _api_key: str):
     """Cache distance matrix keyed on the set of coordinates."""
     locations = [{"lat": lat, "lng": lng} for lat, lng in locations_tuple]
@@ -215,7 +221,7 @@ def get_stop_label(index: int) -> str:
 
 
 def meters_to_miles(meters: float) -> float:
-    return meters / 1609.344
+    return meters / METERS_PER_MILE
 
 
 def seconds_to_hm(seconds: int) -> str:
@@ -340,7 +346,7 @@ st.markdown("""
     <div style="background: linear-gradient(135deg, #E8654A 0%, #E9A820 100%); border-radius: 16px; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; font-size: 28px; box-shadow: 0 4px 12px rgba(232, 101, 74, 0.3); flex-shrink: 0;">&#x1F697;</div>
     <div>
         <h1 style="margin: 0; padding: 0; font-size: 2rem; font-weight: 800; color: #2D2D2D; line-height: 1.1;">Donna's Drive Time</h1>
-        <p style="margin: 4px 0 0 0; color: #6B6B6B; font-size: 1.05rem;">Find the fastest driving order for all your stops</p>
+        <p style="margin: 4px 0 0 0; color: #6B6B6B; font-size: 1.05rem;">Find the fastest driving order for all your stops &nbsp;<span style="font-size: 0.75rem; opacity: 0.6;">v{VERSION}</span></p>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -510,8 +516,8 @@ else:
 # Estimated API cost
 if n_total >= 2 and not over_limit:
     matrix_elements = n_total * n_total
-    geocode_cost = n_total * 0.005
-    matrix_cost = (matrix_elements / 1000) * 5.0
+    geocode_cost = n_total * GEOCODE_COST_PER_REQUEST
+    matrix_cost = (matrix_elements / 1000) * MATRIX_COST_PER_1K_ELEMENTS
     estimated_cost = geocode_cost + matrix_cost
     st.caption(f"Estimated cost: ~${estimated_cost:.2f}")
 
@@ -562,11 +568,11 @@ if submitted:
             st.warning("Upload a CSV with at least two stop addresses, or add a home address with one stop.")
         st.stop()
 
-    # Rate limiting: 30-second cooldown
+    # Rate limiting cooldown
     now = time.time()
     elapsed = now - st.session_state.last_optimize_time
-    if elapsed < 30:
-        remaining = int(30 - elapsed)
+    if elapsed < RATE_LIMIT_SECONDS:
+        remaining = int(RATE_LIMIT_SECONDS - elapsed)
         st.warning(f"Please wait {remaining} seconds before optimizing again.")
         st.stop()
 
